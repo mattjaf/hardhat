@@ -186,11 +186,6 @@ impl RpcClient {
         cache_dir: PathBuf,
         extra_headers: Option<HeaderMap>,
     ) -> Result<Self, RpcClientError> {
-        let retry_policy = ExponentialBackoff::builder()
-            .retry_bounds(MIN_RETRY_INTERVAL, MAX_RETRY_INTERVAL)
-            .base(EXPONENT_BASE)
-            .build_with_max_retries(MAX_RETRIES);
-
         let mut headers = extra_headers.unwrap_or_default();
         headers.append(
             header::CONTENT_TYPE,
@@ -210,29 +205,42 @@ impl RpcClient {
         #[cfg(feature = "tracing")]
         let client = HttpClientBuilder::new(client)
             .with(TracingMiddleware::default())
-            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
             .build();
         #[cfg(not(feature = "tracing"))]
-        let client = HttpClientBuilder::new(client)
-            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
-            .build();
+        let client = HttpClientBuilder::new(client).build();
 
         let rpc_cache_dir = cache_dir.join(RPC_CACHE_DIR);
-        // We aren't using the system temporary directories as they may be on a
-        // different a file system which would cause the rename call later to
-        // fail.
         let tmp_dir = rpc_cache_dir.join(TMP_DIR);
 
         Ok(RpcClient {
             url: url.parse()?,
             chain_id: OnceCell::new(),
             cached_block_number: RwLock::new(None),
-            client,
+            client: RpcClient::with_retry(client),
             next_id: AtomicU64::new(0),
             rpc_cache_dir: cache_dir.join(RPC_CACHE_DIR),
             tmp_dir,
         })
     }
+}
+
+impl RpcClient {
+    fn with_retry(client: Client) -> Client {
+        const MAX_RETRIES: u32 = 5;
+        const INITIAL_BACKOFF: u64 = 100; // 100 milliseconds
+
+        let retry_policy = ExponentialBackoff::builder()
+            .retry_bounds(MIN_RETRY_INTERVAL, MAX_RETRY_INTERVAL)
+            .base(EXPONENT_BASE)
+            .build_with_max_retries(MAX_RETRIES);
+
+        let client = HttpClientBuilder::new(client)
+            .with(RetryTransientMiddleware::new_with_policy(retry_policy))
+            .build();
+
+        client
+    }
+}
 
     fn parse_response_str<T: DeserializeOwned>(response: &str) -> Result<T, RpcClientError> {
         serde_json::from_str(response).map_err(|error| RpcClientError::InvalidResponse {
