@@ -221,7 +221,7 @@ impl TryFrom<ProviderConfig> for edr_provider::ProviderConfig {
                                  spec_id,
                              }| {
                                 let block_number = block_number.try_cast()?;
-                                let spec_id = spec_id.into();
+                                let spec_id = spec_id.try_into()?;
 
                                 Ok((block_number, spec_id))
                             },
@@ -263,7 +263,7 @@ impl TryFrom<ProviderConfig> for edr_provider::ProviderConfig {
             coinbase: value.coinbase.try_cast()?,
             fork: value.fork.map(TryInto::try_into).transpose()?,
             genesis_accounts: HashMap::new(),
-            hardfork: value.hardfork.into(),
+            hardfork: value.hardfork.try_into()?,
             initial_base_fee_per_gas: value
                 .initial_base_fee_per_gas
                 .map(TryCast::try_cast)
